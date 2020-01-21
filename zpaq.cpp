@@ -1,6 +1,6 @@
 // zpaq.cpp - Journaling incremental deduplicating archiver
 
-#define ZPAQ_VERSION "7.15"
+#define ZPAQ_VERSION "7.15-tony-revision"
 /*
   This software is provided as-is, with no warranty.
   I, Matt Mahoney, release this software into
@@ -93,6 +93,19 @@ Possible options:
 #include <errno.h>
 #ifdef BSD
 #include <sys/sysctl.h>
+#endif
+
+#ifdef unixtest
+struct termios {
+  int c_lflag;
+};
+#define ECHO 1
+#define ECHONL 2
+#define TCSANOW 4
+int tcgetattr(int, termios*) {return 0;}
+int tcsetattr(int, int, termios*) {return 0;}
+#else
+#include <termios.h>
 #endif
 
 #else  // Assume Windows
@@ -940,6 +953,91 @@ int64_t btol(const char* &s) {
   return r+(uint64_t(btoi(s))<<32);
 }
 
+
+/////////////////////////// read_password ////////////////////////////
+
+// Read a password from argv[i+1..argc-1] or from the console without
+// echo (repeats times) if this sequence is empty. repeats can be 1 or 2.
+// If 2, require the same password to be entered twice in a row.
+// Advance i by the number of words in the password on the command
+// line, which will be 0 if the user is prompted.
+// Write the SHA-256 hash of the password in hash[0..31].
+// Return the length of the original password.
+
+int read_password(char* hash, int repeats,
+                 int argc, const char** argv, int& i) {
+  assert(repeats==1 || repeats==2);
+  libzpaq::SHA256 sha256;
+  int result=0;
+
+  // Read password from argv[i+1..argc-1]
+  if (i<argc-1 && argv[i+1][0]!='-') {
+    while (true) {  // read multi-word password with spaces between args
+      ++i;
+      for (const char* p=argv[i]; p && *p; ++p) sha256.put(*p);
+      if (i<argc-1 && argv[i+1][0]!='-') sha256.put(' ');
+      else break;
+    }
+    result=sha256.usize();
+    memcpy(hash, sha256.result(), 32);
+    return result;
+  }
+
+  // Otherwise prompt user
+  char oldhash[32]={0};
+  if (repeats==2)
+    fprintf(stderr, "Enter new password twice:\n");
+  else {
+    fprintf(stderr, "Password: ");
+    fflush(stderr);
+  }
+  do {
+
+  // Read password without echo to end of line
+#if unix
+    struct termios term, oldterm;
+    FILE* in=fopen("/dev/tty", "r");
+    if (!in) in=stdin;
+    tcgetattr(fileno(in), &oldterm);
+    memcpy(&term, &oldterm, sizeof(term));
+    term.c_lflag&=~ECHO;
+    term.c_lflag|=ECHONL;
+    tcsetattr(fileno(in), TCSANOW, &term);
+    char buf[256];
+    if (!fgets(buf, 250, in)) return 0;
+    tcsetattr(fileno(in), TCSANOW, &oldterm);
+    if (in!=stdin) fclose(in);
+    for (unsigned i=0; i<250 && buf[i]!=10 && buf[i]!=13 && buf[i]!=0; ++i)
+      sha256.put(buf[i]);
+#else
+    HANDLE h=GetStdHandle(STD_INPUT_HANDLE);
+    DWORD mode=0, n=0;
+    wchar_t buf[256];
+    if (h!=INVALID_HANDLE_VALUE
+        && GetConsoleMode(h, &mode)
+        && SetConsoleMode(h, mode&~ENABLE_ECHO_INPUT)
+        && ReadConsole(h, buf, 250, &n, NULL)) {
+      SetConsoleMode(h, mode);
+      fprintf(stderr, "\n");
+      for (unsigned i=0; i<n && i<250 && buf[i]!=10 && buf[i]!=13; ++i)
+        sha256.put(buf[i]);
+    }
+    else {
+      fflush(stdout);
+      fprintf(stderr, "Windows error %d\n", int(GetLastError()));
+      error("Read password failed");
+    }
+#endif
+    result=sha256.usize();
+    memcpy(oldhash, hash, 32);
+    memcpy(hash, sha256.result(), 32);
+    memset(buf, 0, sizeof(buf));  // clear sensitive data
+  }
+  while (repeats==2 && memcmp(oldhash, hash, 32));
+  return result;
+}
+
+
 /////////////////////////////// Jidac /////////////////////////////////
 
 // A Jidac object represents an archive contents: a list of file
@@ -1089,7 +1187,7 @@ void Jidac::usage() {
 "                  List: compare file contents instead of dates.\n"
 "  -index F        Extract: create index F for archive.\n"
 "                  Add: create suffix for archive indexed by F, update F.\n"
-"  -key X          Create or access encrypted archive with password X.\n"
+"  -key X          Create/access encrypted archive with password X (or prompt if none given).\n"
 "  -mN  -method N  Compress level N (0..5 = faster..better, default 1).\n"
 "  -noattributes   Ignore/don't save file attributes or permissions.\n"
 "  -not files...   Exclude. * and ? match any string or char.\n"
@@ -1219,11 +1317,10 @@ int Jidac::doCommand(int argc, const char** argv) {
     else if (opt=="-force" || opt=="-f") force=true;
     else if (opt=="-fragment" && i<argc-1) fragment=atoi(argv[++i]);
     else if (opt=="-index" && i<argc-1) index=argv[++i];
-    else if (opt=="-key" && i<argc-1) {
-      libzpaq::SHA256 sha256;
-      for (const char* p=argv[++i]; *p; ++p) sha256.put(*p);
-      memcpy(password_string, sha256.result(), 32);
-      password=password_string;
+    else if (opt=="-key") {
+      if (read_password(password_string, 2-exists(archive),
+          argc, argv, i))
+        password=password_string;
     }
     else if (opt=="-method" && i<argc-1) method=argv[++i];
     else if (opt[1]=='m') method=argv[i]+2;

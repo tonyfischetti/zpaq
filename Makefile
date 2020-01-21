@@ -1,7 +1,7 @@
 CXX=g++
 CPPFLAGS+=-Dunix
 # CPPFLAGS+=NOJIT
-CXXFLAGS=-O3 -march=native
+CXXFLAGS=-O3 -march=native -mtune=native -pipe
 PREFIX=/usr/local
 BINDIR=$(PREFIX)/bin
 MANDIR=$(PREFIX)/share/man
@@ -12,10 +12,10 @@ libzpaq.o: libzpaq.cpp libzpaq.h
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -o $@ -c libzpaq.cpp
 
 zpaq.o: zpaq.cpp libzpaq.h
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -o $@ -c zpaq.cpp -pthread
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -o $@ -c zpaq.cpp -pthread -fopenmp
 
 zpaq: zpaq.o libzpaq.o
-	$(CXX) $(LDFLAGS) -o $@ zpaq.o libzpaq.o -pthread
+	$(CXX) $(LDFLAGS) -o $@ zpaq.o libzpaq.o -pthread -fopenmp
 
 zpaq.1: zpaq.pod
 	pod2man $< >$@
