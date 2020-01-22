@@ -1128,7 +1128,7 @@ private:
   const char* index;        // index option
   char password_string[32]; // hash of -key argument
   const char* password;     // points to password_string or NULL
-  string method;            // default "1"
+  string method;            // default "3"
   bool noattributes;        // -noattributes option
   vector<string> notfiles;  // list of prefixes to exclude
   string nottype;           // -not =...
@@ -1188,7 +1188,7 @@ void Jidac::usage() {
 "  -index F        Extract: create index F for archive.\n"
 "                  Add: create suffix for archive indexed by F, update F.\n"
 "  -key X          Create/access encrypted archive with password X (or prompt if none given).\n"
-"  -mN  -method N  Compress level N (0..5 = faster..better, default 1).\n"
+"  -mN  -method N  Compress level N (0..5 = faster..better, default 3).\n"
 "  -noattributes   Ignore/don't save file attributes or permissions.\n"
 "  -not files...   Exclude. * and ? match any string or char.\n"
 "       =[+-#^?]   List: exclude by comparison result.\n"
@@ -2277,7 +2277,7 @@ int Jidac::add() {
   printf(" at offset %1.0f + %1.0f\n", double(header_pos), double(offset));
 
   // Set method
-  if (method=="") method="1";
+  if (method=="") method="3";
   if (method.size()==1) {  // set default blocksize
     if (method[0]>='2' && method[0]<='9') method+="6";
     else method+="4";
